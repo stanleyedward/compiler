@@ -2,256 +2,212 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdbool.h>
+#include <ctype.h>
 
-#define MAX_SYMBOLS 100
-#define MAX_RULES 100
-#define MAX_RHS 20
+#define MAX_GRAMMAR_SIZE 20
+#define MAX_SYMBOL_LENGTH 10
 
-// Symbol types
-#define NON_TERMINAL 0
-#define TERMINAL 1
-#define EPSILON 2
-#define END_MARKER 3
-
-// Structure for symbols
+// Grammar representation using simple arrays
 typedef struct {
-    char name[10];
-    int type;
-} Symbol;
+    char lhs;
+    char rhs[20];
+    int length;
+} Production;
 
-// Structure for grammar rules (productions)
-typedef struct {
-    int lhs;                // Left hand side non-terminal index
-    int rhs[MAX_RHS];       // Right hand side symbols indices
-    int rhs_length;
-} Rule;
-
-// Grammar representation
-Symbol symbols[MAX_SYMBOLS];
-Rule rules[MAX_RULES];
-int num_symbols = 0;
-int num_rules = 0;
-int start_symbol = 0;
+Production grammar[MAX_GRAMMAR_SIZE];
+int num_productions = 0;
+char start_symbol;
 
 // Sets for FIRST and FOLLOW
-bool first[MAX_SYMBOLS][MAX_SYMBOLS];
-bool follow[MAX_SYMBOLS][MAX_SYMBOLS];
-bool first_calculated[MAX_SYMBOLS] = {false};
-bool follow_calculated[MAX_SYMBOLS] = {false};
+char first[26][MAX_GRAMMAR_SIZE];  // Array for each uppercase letter (A-Z)
+char follow[26][MAX_GRAMMAR_SIZE]; 
+int first_size[26] = {0};
+int follow_size[26] = {0};
+bool first_computed[26] = {false};
+bool follow_computed[26] = {false};
 
-// Function to add a symbol
-int add_symbol(const char* name, int type) {
-    for (int i = 0; i < num_symbols; i++) {
-        if (strcmp(symbols[i].name, name) == 0) {
-            return i;
-        }
-    }
-    
-    strcpy(symbols[num_symbols].name, name);
-    symbols[num_symbols].type = type;
-    return num_symbols++;
+// Add production to the grammar
+void add_production(char lhs, const char* rhs) {
+    grammar[num_productions].lhs = lhs;
+    grammar[num_productions].length = strlen(rhs);
+    strcpy(grammar[num_productions].rhs, rhs);
+    num_productions++;
 }
 
-// Function to add a rule
-void add_rule(const char* lhs, const char** rhs, int rhs_length) {
-    int lhs_idx = add_symbol(lhs, NON_TERMINAL);
-    
-    rules[num_rules].lhs = lhs_idx;
-    rules[num_rules].rhs_length = rhs_length;
-    
-    for (int i = 0; i < rhs_length; i++) {
-        // Automatically determine the type: uppercase letters are non-terminals
-        int type = (rhs[i][0] >= 'A' && rhs[i][0] <= 'Z') ? NON_TERMINAL : TERMINAL;
-        if (strcmp(rhs[i], "ε") == 0) type = EPSILON;
-        
-        rules[num_rules].rhs[i] = add_symbol(rhs[i], type);
+// Check if a character c is in set
+bool is_in_set(char c, char* set, int set_size) {
+    for (int i = 0; i < set_size; i++) {
+        if (set[i] == c)
+            return true;
     }
-    
-    num_rules++;
+    return false;
 }
 
-// Calculate FIRST set for a symbol
-void calculate_first(int symbol) {
+// Add c to set if not already present
+void add_to_set(char c, char* set, int* set_size) {
+    if (!is_in_set(c, set, *set_size)) {
+        set[(*set_size)++] = c;
+    }
+}
+
+// Add all elements from source_set to dest_set
+void union_sets(char* source_set, int source_size, char* dest_set, int* dest_size) {
+    for (int i = 0; i < source_size; i++) {
+        add_to_set(source_set[i], dest_set, dest_size);
+    }
+}
+
+// Check if epsilon is in the first set of X
+bool has_epsilon(char X) {
+    int idx = X - 'A';
+    return is_in_set('e', first[idx], first_size[idx]);
+}
+
+// Calculate FIRST set for a non-terminal
+void compute_first(char X) {
+    int idx = X - 'A';
+    
     // If already calculated
-    if (first_calculated[symbol]) return;
-    
-    first_calculated[symbol] = true;
-    
-    // If terminal, FIRST contains only itself
-    if (symbols[symbol].type == TERMINAL || symbols[symbol].type == EPSILON || symbols[symbol].type == END_MARKER) {
-        first[symbol][symbol] = true;
+    if (first_computed[idx])
         return;
-    }
     
-    // For non-terminals, check all rules
-    for (int i = 0; i < num_rules; i++) {
-        if (rules[i].lhs == symbol) {
-            // If ε is in the right hand side
-            if (rules[i].rhs_length == 1 && symbols[rules[i].rhs[0]].type == EPSILON) {
-                int epsilon_idx = rules[i].rhs[0];
-                first[symbol][epsilon_idx] = true;
-                continue;
-            }
-            
-            // Process each symbol in the right hand side
-            for (int j = 0; j < rules[i].rhs_length; j++) {
-                int current = rules[i].rhs[j];
+    first_computed[idx] = true;
+    
+    // Go through all productions where X is on the LHS
+    for (int i = 0; i < num_productions; i++) {
+        if (grammar[i].lhs == X) {
+            // Case 1: X -> ε
+            if (grammar[i].length == 1 && grammar[i].rhs[0] == 'e') {
+                add_to_set('e', first[idx], &first_size[idx]);
+            } 
+            // Case 2: X -> Y...
+            else {
+                bool added_epsilon = true;
                 
-                // Calculate FIRST for this symbol if not done yet
-                if (!first_calculated[current]) {
-                    calculate_first(current);
-                }
-                
-                // Add all symbols from FIRST(current) to FIRST(symbol) except ε
-                for (int k = 0; k < num_symbols; k++) {
-                    if (first[current][k] && symbols[k].type != EPSILON) {
-                        first[symbol][k] = true;
-                    }
-                }
-                
-                // If ε is not in FIRST(current), break
-                bool has_epsilon = false;
-                for (int k = 0; k < num_symbols; k++) {
-                    if (first[current][k] && symbols[k].type == EPSILON) {
-                        has_epsilon = true;
+                // Process each symbol in the right-hand side
+                for (int j = 0; j < grammar[i].length; j++) {
+                    char Y = grammar[i].rhs[j];
+                    
+                    // If terminal, add to FIRST(X) and break
+                    if (islower(Y) || Y == '(' || Y == ')' || Y == '$' || Y == '+' || Y == '*') {
+                        add_to_set(Y, first[idx], &first_size[idx]);
+                        added_epsilon = false;
                         break;
                     }
-                }
-                
-                if (!has_epsilon) break;
-                
-                // If we reached the last symbol and all can derive ε, add ε to FIRST(symbol)
-                if (j == rules[i].rhs_length - 1) {
-                    for (int k = 0; k < num_symbols; k++) {
-                        if (symbols[k].type == EPSILON) {
-                            first[symbol][k] = true;
+                    // If non-terminal, compute FIRST(Y) and add to FIRST(X)
+                    else if (isupper(Y)) {
+                        compute_first(Y);
+                        int Y_idx = Y - 'A';
+                        
+                        // Add all except epsilon from FIRST(Y) to FIRST(X)
+                        for (int k = 0; k < first_size[Y_idx]; k++) {
+                            if (first[Y_idx][k] != 'e') {
+                                add_to_set(first[Y_idx][k], first[idx], &first_size[idx]);
+                            }
+                        }
+                        
+                        // If no epsilon in FIRST(Y), break
+                        if (!has_epsilon(Y)) {
+                            added_epsilon = false;
                             break;
                         }
                     }
                 }
+                
+                // If we went through all symbols and they all have epsilon,
+                // add epsilon to FIRST(X)
+                if (added_epsilon) {
+                    add_to_set('e', first[idx], &first_size[idx]);
+                }
             }
         }
     }
 }
 
-// Calculate FOLLOW set for a symbol
-void calculate_follow(int symbol) {
+// Calculate FOLLOW set for a non-terminal
+void compute_follow(char X) {
+    int idx = X - 'A';
+    
     // If already calculated
-    if (follow_calculated[symbol]) return;
+    if (follow_computed[idx])
+        return;
     
-    follow_calculated[symbol] = true;
+    follow_computed[idx] = true;
     
-    // Add $ to FOLLOW of start symbol
-    if (symbol == start_symbol) {
-        for (int i = 0; i < num_symbols; i++) {
-            if (symbols[i].type == END_MARKER) {
-                follow[symbol][i] = true;
-                break;
-            }
-        }
+    // For start symbol, add $ to FOLLOW set
+    if (X == start_symbol) {
+        add_to_set('$', follow[idx], &follow_size[idx]);
     }
     
-    // Find all occurrences of this symbol in the right hand sides
-    for (int i = 0; i < num_rules; i++) {
-        for (int j = 0; j < rules[i].rhs_length; j++) {
-            if (rules[i].rhs[j] == symbol) {
-                // Case 1: A → αBβ - add FIRST(β) to FOLLOW(B)
-                if (j < rules[i].rhs_length - 1) {
-                    int next = rules[i].rhs[j + 1];
+    // For each production
+    for (int i = 0; i < num_productions; i++) {
+        // Find X in RHS of the production
+        for (int j = 0; j < grammar[i].length; j++) {
+            if (grammar[i].rhs[j] == X) {
+                // Case 1: A -> αXβ, add FIRST(β) to FOLLOW(X)
+                if (j < grammar[i].length - 1) {
+                    char beta = grammar[i].rhs[j+1];
                     
-                    // Make sure FIRST is calculated
-                    if (!first_calculated[next]) {
-                        calculate_first(next);
-                    }
-                    
-                    // Add all from FIRST(next) to FOLLOW(symbol) except ε
-                    bool has_epsilon = false;
-                    for (int k = 0; k < num_symbols; k++) {
-                        if (first[next][k]) {
-                            if (symbols[k].type == EPSILON) {
-                                has_epsilon = true;
-                            } else {
-                                follow[symbol][k] = true;
-                            }
-                        }
-                    }
-                    
-                    // If ε is in FIRST(next), proceed to next symbol or apply Case 2
-                    if (has_epsilon) {
-                        // If this is the last symbol in the rule, apply Case 2
-                        if (j + 1 == rules[i].rhs_length - 1) {
-                            // Case 2: A → αB or A → αBβ where ε is in FIRST(β)
-                            // Add FOLLOW(A) to FOLLOW(B)
-                            int lhs = rules[i].lhs;
+                    if (islower(beta) || beta == '(' || beta == ')' || beta == '$' || beta == '+' || beta == '*') {
+                        add_to_set(beta, follow[idx], &follow_size[idx]);
+                    } else if (isupper(beta)) {
+                        int beta_idx = beta - 'A';
+                        if (!first_computed[beta_idx])
+                            compute_first(beta);
                             
-                            // Avoid infinite recursion
-                            if (lhs != symbol) {
-                                if (!follow_calculated[lhs]) {
-                                    calculate_follow(lhs);
-                                }
-                                
-                                // Copy all from FOLLOW(lhs) to FOLLOW(symbol)
-                                for (int k = 0; k < num_symbols; k++) {
-                                    if (follow[lhs][k]) {
-                                        follow[symbol][k] = true;
-                                    }
-                                }
+                        // Add all except epsilon
+                        for (int k = 0; k < first_size[beta_idx]; k++) {
+                            if (first[beta_idx][k] != 'e') {
+                                add_to_set(first[beta_idx][k], follow[idx], &follow_size[idx]);
                             }
-                        }
-                    }
-                } else {
-                    // Case 2: A → αB
-                    // Add FOLLOW(A) to FOLLOW(B)
-                    int lhs = rules[i].lhs;
-                    
-                    // Avoid infinite recursion
-                    if (lhs != symbol) {
-                        if (!follow_calculated[lhs]) {
-                            calculate_follow(lhs);
                         }
                         
-                        // Copy all from FOLLOW(lhs) to FOLLOW(symbol)
-                        for (int k = 0; k < num_symbols; k++) {
-                            if (follow[lhs][k]) {
-                                follow[symbol][k] = true;
-                            }
+                        // If epsilon in FIRST(β), add FOLLOW(A) to FOLLOW(X)
+                        if (has_epsilon(beta)) {
+                            compute_follow(grammar[i].lhs);
+                            union_sets(follow[grammar[i].lhs - 'A'], 
+                                      follow_size[grammar[i].lhs - 'A'], 
+                                      follow[idx], 
+                                      &follow_size[idx]);
                         }
                     }
+                }
+                // Case 2: A -> αX, add FOLLOW(A) to FOLLOW(X)
+                else if (j == grammar[i].length - 1 && grammar[i].lhs != X) {
+                    compute_follow(grammar[i].lhs);
+                    union_sets(follow[grammar[i].lhs - 'A'], 
+                              follow_size[grammar[i].lhs - 'A'], 
+                              follow[idx], 
+                              &follow_size[idx]);
                 }
             }
         }
     }
 }
 
-// Print FIRST and FOLLOW sets
+// Print sets
 void print_sets() {
-    printf("FIRST sets:\n");
-    for (int i = 0; i < num_symbols; i++) {
-        if (symbols[i].type == NON_TERMINAL) {
-            printf("FIRST(%s) = { ", symbols[i].name);
-            bool first_printed = false;
-            for (int j = 0; j < num_symbols; j++) {
-                if (first[i][j]) {
-                    if (first_printed) printf(", ");
-                    printf("%s", symbols[j].name);
-                    first_printed = true;
-                }
+    printf("FIRST SETS:\n");
+    for (int i = 0; i < 26; i++) {
+        if (first_size[i] > 0) {
+            printf("FIRST(%c) = { ", 'A' + i);
+            for (int j = 0; j < first_size[i]; j++) {
+                printf("%c", first[i][j]);
+                if (j < first_size[i] - 1)
+                    printf(", ");
             }
             printf(" }\n");
         }
     }
     
-    printf("\nFOLLOW sets:\n");
-    for (int i = 0; i < num_symbols; i++) {
-        if (symbols[i].type == NON_TERMINAL) {
-            printf("FOLLOW(%s) = { ", symbols[i].name);
-            bool first_printed = false;
-            for (int j = 0; j < num_symbols; j++) {
-                if (follow[i][j]) {
-                    if (first_printed) printf(", ");
-                    printf("%s", symbols[j].name);
-                    first_printed = true;
-                }
+    printf("\nFOLLOW SETS:\n");
+    for (int i = 0; i < 26; i++) {
+        if (follow_size[i] > 0) {
+            printf("FOLLOW(%c) = { ", 'A' + i);
+            for (int j = 0; j < follow_size[i]; j++) {
+                printf("%c", follow[i][j]);
+                if (j < follow_size[i] - 1)
+                    printf(", ");
             }
             printf(" }\n");
         }
@@ -259,77 +215,29 @@ void print_sets() {
 }
 
 int main() {
-    // Initialize example grammar
-    add_symbol("$", END_MARKER);  // End marker
-    
-    // // Example grammar:
-    // // E → T E'
-    // // E' → + T E' | ε
-    // // T → F T'
-    // // T' → * F T' | ε
-    // // F → ( E ) | id
-    
-    // const char* rhs1[] = {"T", "E'"};
-    // add_rule("E", rhs1, 2);
-    
-    // const char* rhs2[] = {"+", "T", "E'"};
-    // add_rule("E'", rhs2, 3);
-    
-    // const char* rhs3[] = {"ε"};
-    // add_rule("E'", rhs3, 1);
-    
-    // const char* rhs4[] = {"F", "T'"};
-    // add_rule("T", rhs4, 2);
-    
-    // const char* rhs5[] = {"*", "F", "T'"};
-    // add_rule("T'", rhs5, 3);
-    
-    // const char* rhs6[] = {"ε"};
-    // add_rule("T'", rhs6, 1);
-    
-    // const char* rhs7[] = {"(", "E", ")"};
-    // add_rule("F", rhs7, 3);
-    
-    // const char* rhs8[] = {"id"};
-    // add_rule("F", rhs8, 1);
-
     // Simple grammar:
-    // S → A B
-    // A → a | ε
-    // B → b
+    // S -> A B
+    // A -> a | e
+    // B -> b
+    add_production('S', "AB");
+    add_production('A', "a");
+    add_production('A', "e");  // e represents epsilon
+    add_production('B', "b");
     
-    const char* rhs1[] = {"A", "B"};
-    add_rule("S", rhs1, 2);
+    start_symbol = 'S';
     
-    const char* rhs2[] = {"a"};
-    add_rule("A", rhs2, 1);
-    
-    const char* rhs3[] = {"ε"};
-    add_rule("A", rhs3, 1);
-    
-    const char* rhs4[] = {"b"};
-    add_rule("B", rhs4, 1);
-    
-    // Find the index of the start symbol 'E'
-    for (int i = 0; i < num_symbols; i++) {
-        if (strcmp(symbols[i].name, "S") == 0) {
-            start_symbol = i;
-            break;
-        }
+    // Calculate FIRST for all non-terminals
+    for (int i = 0; i < num_productions; i++) {
+        char nt = grammar[i].lhs;
+        if (!first_computed[nt - 'A'])
+            compute_first(nt);
     }
     
-    // Calculate FIRST sets for all non-terminals
-    for (int i = 0; i < num_symbols; i++) {
-        if (symbols[i].type == NON_TERMINAL) {
-            calculate_first(i);
-        }
-    }
-    
-    // Calculate FOLLOW sets for all non-terminals
-    for (int i = 0; i < num_symbols; i++) {
-        if (symbols[i].type == NON_TERMINAL) {
-            calculate_follow(i);
-        }
+    // Calculate FOLLOW for all non-terminals
+    for (int i = 0; i < num_productions; i++) {
+        char nt = grammar[i].lhs;
+        if (!follow_computed[nt - 'A'])
+            compute_follow(nt);
     }
     
     // Print results
