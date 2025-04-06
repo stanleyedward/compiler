@@ -63,6 +63,67 @@ bool has_epsilon(char X) {
     return is_in_set('e', first[idx], first_size[idx]);
 }
 
+// Print sets
+void print_sets() {
+    printf("FIRST SETS:\n");
+    for (int i = 0; i < 26; i++) {
+        if (first_size[i] > 0) {
+            printf("FIRST(%c) = { ", 'A' + i);
+            for (int j = 0; j < first_size[i]; j++) {
+                printf("%c", first[i][j]);
+                if (j < first_size[i] - 1)
+                    printf(", ");
+            }
+            printf(" }\n");
+        }
+    }
+    
+    printf("\nFOLLOW SETS:\n");
+    for (int i = 0; i < 26; i++) {
+        if (follow_size[i] > 0) {
+            printf("FOLLOW(%c) = { ", 'A' + i);
+            for (int j = 0; j < follow_size[i]; j++) {
+                printf("%c", follow[i][j]);
+                if (j < follow_size[i] - 1)
+                    printf(", ");
+            }
+            printf(" }\n");
+        }
+    }
+}
+
+int main() {
+    // Simple grammar:
+    // S -> A B
+    // A -> a | e
+    // B -> b
+    add_production('S', "AB");
+    add_production('A', "a");
+    add_production('A', "e");  // e represents epsilon
+    add_production('B', "b");
+    
+    start_symbol = 'S';
+    
+    // Calculate FIRST for all non-terminals
+    for (int i = 0; i < num_productions; i++) {
+        char nt = grammar[i].lhs;
+        if (!first_computed[nt - 'A'])
+            compute_first(nt);
+    }
+    
+    // Calculate FOLLOW for all non-terminals
+    for (int i = 0; i < num_productions; i++) {
+        char nt = grammar[i].lhs;
+        if (!follow_computed[nt - 'A'])
+            compute_follow(nt);
+    }
+    
+    // Print results
+    print_sets();
+    
+    return 0;
+}
+
 // Calculate FIRST set for a non-terminal
 void compute_first(char X) {
     int idx = X - 'A';
@@ -185,63 +246,3 @@ void compute_follow(char X) {
     }
 }
 
-// Print sets
-void print_sets() {
-    printf("FIRST SETS:\n");
-    for (int i = 0; i < 26; i++) {
-        if (first_size[i] > 0) {
-            printf("FIRST(%c) = { ", 'A' + i);
-            for (int j = 0; j < first_size[i]; j++) {
-                printf("%c", first[i][j]);
-                if (j < first_size[i] - 1)
-                    printf(", ");
-            }
-            printf(" }\n");
-        }
-    }
-    
-    printf("\nFOLLOW SETS:\n");
-    for (int i = 0; i < 26; i++) {
-        if (follow_size[i] > 0) {
-            printf("FOLLOW(%c) = { ", 'A' + i);
-            for (int j = 0; j < follow_size[i]; j++) {
-                printf("%c", follow[i][j]);
-                if (j < follow_size[i] - 1)
-                    printf(", ");
-            }
-            printf(" }\n");
-        }
-    }
-}
-
-int main() {
-    // Simple grammar:
-    // S -> A B
-    // A -> a | e
-    // B -> b
-    add_production('S', "AB");
-    add_production('A', "a");
-    add_production('A', "e");  // e represents epsilon
-    add_production('B', "b");
-    
-    start_symbol = 'S';
-    
-    // Calculate FIRST for all non-terminals
-    for (int i = 0; i < num_productions; i++) {
-        char nt = grammar[i].lhs;
-        if (!first_computed[nt - 'A'])
-            compute_first(nt);
-    }
-    
-    // Calculate FOLLOW for all non-terminals
-    for (int i = 0; i < num_productions; i++) {
-        char nt = grammar[i].lhs;
-        if (!follow_computed[nt - 'A'])
-            compute_follow(nt);
-    }
-    
-    // Print results
-    print_sets();
-    
-    return 0;
-}
